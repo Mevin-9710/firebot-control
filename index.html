@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0e1116">
+<meta name="description" content="FireBot Bluetooth control panel">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<title>FireBot Control</title>
+<style>
+:root{
+  --bg:#0e1116; --panel:#151a21; --panel-2:#1b212a; --line:#262e39; --line-2:#323c49;
+  --ink:#e8edf3; --ink-2:#a9b4c2; --ink-3:#6f7c8d;
+  --accent:#ff5a1f; --ok:#2fbf71; --warn:#f2b33d; --danger:#e5484d; --info:#4a9eff;
+  --r1:8px; --r2:12px; --r3:16px; --gap:10px; --tap:48px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);overflow:hidden;
+  user-select:none;-webkit-user-select:none;overscroll-behavior:none}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--info);outline-offset:2px}
+
+.app{height:100dvh;display:grid;grid-template-rows:auto 1fr;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+/* ---- top bar ---- */
+.bar{display:flex;align-items:center;gap:12px;padding:8px 14px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:.14em;font-size:13px}
+.brand i{width:10px;height:10px;border-radius:2px;background:var(--accent)}
+.link{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-2);white-space:nowrap}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--ink-3);flex:none}
+.dot.live{background:var(--ok);box-shadow:0 0 0 3px #2fbf7126}
+.dot.stale{background:var(--warn)}
+.hb{font:600 11px var(--mono);color:var(--ink-3)}
+.spacer{flex:1}
+.btn{min-height:40px;padding:0 14px;border-radius:var(--r2);border:1px solid var(--line-2);background:var(--panel-2);
+  font-weight:600;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;
+  transition:background .15s,border-color .15s,transform .1s}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.ghost{background:transparent}
+.btn svg{width:18px;height:18px}
+
+/* ---- main grid: landscape = 3 columns ---- */
+.main{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.15fr) minmax(200px,.9fr);gap:var(--gap);padding:var(--gap);min-height:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r3);padding:12px;display:flex;flex-direction:column;gap:10px;min-height:0}
+.panel h2{margin:0;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);display:flex;justify-content:space-between;align-items:center}
+
+/* drive pad */
+.pad{flex:1;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:8px;touch-action:none;min-height:0}
+.pad button{border-radius:var(--r2);border:1px solid var(--line-2);background:var(--panel-2);display:grid;place-items:center;cursor:pointer;touch-action:none;
+  -webkit-touch-callout:none;transition:background .1s,transform .08s;min-height:44px}
+.pad button svg{width:24px;height:24px}
+.pad button.held{background:var(--info);border-color:var(--info);color:#fff;transform:scale(.97)}
+.pad button.stop{color:var(--danger)}
+
+/* centre: status */
+.status{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;border-radius:var(--r2);
+  background:var(--bg);border:1px solid var(--line);padding:12px;min-height:0;transition:background .2s,border-color .2s}
+.status .big{font:700 26px/1.1 var(--sans);letter-spacing:.06em}
+.status .sub{color:var(--ink-2);font-size:13px}
+.status.armed{border-color:#ff5a1f66}
+.status.fire{background:var(--danger);border-color:var(--danger);animation:flash .6s ease-in-out infinite alternate}
+.status.fire .sub{color:#fff}
+.status.fire .steps span{border-color:#ffffff55;color:#ffffffaa}.status.fire .steps span.done{color:#fff;border-color:#fff}
+.status.fire .steps span.on{background:#fff;border-color:#fff;color:#b3262b}
+.status.fire .view{display:none}
+@keyframes flash{to{background:#b3262b}}
+.steps{display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
+.steps span{font:600 10px var(--mono);padding:3px 6px;border-radius:5px;border:1px solid var(--line-2);color:var(--ink-3)}
+.steps span.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.steps span.done{color:var(--ink-2);border-color:var(--ink-3)}
+.view{font-size:12px;color:var(--ink-3);display:flex;align-items:center;gap:6px}
+.view .dot.flame{background:var(--warn);box-shadow:0 0 0 3px #f2b33d33}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.arm{min-height:var(--tap);border-radius:var(--r2);border:1px solid var(--line-2);background:var(--panel-2);font-weight:800;letter-spacing:.1em;cursor:pointer}
+.arm.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.stopbtn{min-height:var(--tap);border-radius:var(--r2);border:1px solid var(--danger);background:#e5484d22;color:#ff8f93;font-weight:800;letter-spacing:.1em;cursor:pointer}
+.stopbtn:active,.arm:active{transform:scale(.98)}
+
+/* right: actions */
+.pump{flex:1;min-height:64px;border-radius:var(--r2);border:1px solid #1d6fa5;background:#123247;color:#cfe8ff;font-weight:800;letter-spacing:.1em;
+  cursor:pointer;touch-action:none;-webkit-touch-callout:none}
+.pump.held{background:var(--info);border-color:var(--info);color:#fff}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:var(--tap)}
+.sw .t{font-weight:600}.sw .d{font-size:11px;color:var(--ink-3)}
+.toggle{flex:none;position:relative;width:48px;height:28px;border-radius:999px;border:1px solid var(--line-2);background:var(--panel-2);cursor:pointer}
+.toggle::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--ink-2);transition:transform .15s}
+.toggle.on{background:var(--warn);border-color:var(--warn)}
+.toggle.on::after{transform:translateX(20px);background:#fff}
+
+/* settings sheet */
+.sheet{position:fixed;inset:0;z-index:20;display:none;background:#0008}
+.sheet.open{display:block}
+.sheet .box{position:absolute;right:0;top:0;bottom:0;width:min(560px,100%);background:var(--panel);border-left:1px solid var(--line);
+  display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) 0}
+.sheet header{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.sheet header b{font-size:15px}
+.sheet .body{overflow:auto;padding:12px 16px 24px;display:grid;grid-template-columns:1fr 1fr;gap:4px 20px}
+.sheet h3{grid-column:1/-1;margin:14px 0 2px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+.field label{display:flex;justify-content:space-between;font-weight:600;font-size:13px;margin:8px 0 4px}
+.field output{font-family:var(--mono);color:var(--ink-2);font-weight:500}
+input[type=range]{width:100%;height:28px;accent-color:var(--accent);margin:0}
+.note{grid-column:1/-1;font-size:12px;color:var(--ink-3);margin:6px 0 0}
+
+/* connect overlay */
+.gate{position:fixed;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#0e1116f2;text-align:center;padding:24px}
+.gate.hide{display:none}
+.gate h1{margin:0;font-size:20px;letter-spacing:.14em}
+.gate p{margin:0;color:var(--ink-2);max-width:420px}
+.gate .btn{min-height:52px;padding:0 28px;font-size:15px}
+.gate .err{color:var(--warn);font-size:13px;min-height:18px}
+
+@media (orientation:portrait){
+  html,body{overflow:auto}
+  .app{height:auto;min-height:100dvh}
+  .main{grid-template-columns:1fr}
+  .pad{min-height:240px}
+  .sheet .body{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style></head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand"><i></i>FIREBOT</div>
+    <div class="link"><span class="dot" id="ldot"></span><span id="ltxt">Not connected</span><span class="hb" id="hb"></span></div>
+    <div class="spacer"></div>
+    <button class="btn ghost" id="b-set" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
+    <button class="btn" id="b-conn">Connect</button>
+  </header>
+
+  <main class="main">
+    <section class="panel" aria-label="Drive">
+      <h2>Drive <span>hold to move</span></h2>
+      <div class="pad">
+        <button data-mv="0,1" aria-label="Pivot left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 17 7 7M7 15V7h8"/></svg></button>
+        <button data-mv="1,1" aria-label="Forward"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+        <button data-mv="1,0" aria-label="Pivot right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 17 17 7M9 7h8v8"/></svg></button>
+        <button data-mv="-1,1" aria-label="Spin left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4"/></svg></button>
+        <button data-mv="0,0" aria-label="Stop" class="stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg></button>
+        <button data-mv="1,-1" aria-label="Spin right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/></svg></button>
+        <button data-mv="0,-1" aria-label="Back left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 7 7 17M7 9v8h8"/></svg></button>
+        <button data-mv="-1,-1" aria-label="Backward"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg></button>
+        <button data-mv="-1,0" aria-label="Back right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 9v8H9"/></svg></button>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Fire routine">
+      <h2>Fire routine <span id="st-step">IDLE</span></h2>
+      <div class="status" id="status" role="status" aria-live="assertive">
+        <div class="big" id="big">DISARMED</div>
+        <div class="sub" id="sub">Arm to let the robot react to fire.</div>
+        <div class="steps" id="steps"></div>
+        <div class="view" id="view"><span class="dot" id="vdot"></span><span id="vtxt">Camera: no flame</span></div>
+      </div>
+      <div class="row">
+        <button class="arm" id="b-arm">ARM</button>
+        <button class="stopbtn" id="b-stop">STOP</button>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Actions">
+      <h2>Actions</h2>
+      <button class="pump" id="b-pump">HOLD TO SPRAY</button>
+      <div class="sw"><div><div class="t">Flashlight</div><div class="d">Link check: the LED on the robot</div></div><button class="toggle" id="b-led" role="switch" aria-checked="false" aria-label="Flashlight"></button></div>
+      <div class="sw"><div><div class="t">Siren</div><div class="d">Plays on this phone at the alarm step</div></div><button class="toggle on" id="b-siren" role="switch" aria-checked="true" aria-label="Siren"></button></div>
+      <button class="btn" id="b-test">Run routine (test, no flame)</button>
+    </section>
+  </main>
+</div>
+
+<div class="sheet" id="sheet" aria-hidden="true">
+  <div class="box" role="dialog" aria-label="Settings">
+    <header><b>Routine settings</b><span class="spacer"></span><button class="btn" id="b-close">Done</button></header>
+    <div class="body" id="sbody">
+      <h3>Scan</h3>
+      <div class="field"><label>Turn left <output id="o-tl"></output></label><input type="range" data-k="tl" min="0" max="5000" step="100"></div>
+      <div class="field"><label>Turn right <output id="o-tr"></output></label><input type="range" data-k="tr" min="0" max="5000" step="100"></div>
+      <div class="field"><label>Back to centre <output id="o-tc"></output></label><input type="range" data-k="tc" min="0" max="5000" step="100"></div>
+      <div class="field"><label>Turn power <output id="o-ts"></output></label><input type="range" data-k="ts" min="40" max="100" step="5"></div>
+      <h3>Alarm, approach and spray</h3>
+      <div class="field"><label>Siren <output id="o-ta"></output></label><input type="range" data-k="ta" min="0" max="5000" step="100"></div>
+      <div class="field"><label>Drive forward <output id="o-tf"></output></label><input type="range" data-k="tf" min="0" max="10000" step="100"></div>
+      <div class="field"><label>Pump <output id="o-tp"></output></label><input type="range" data-k="tp" min="0" max="9000" step="100"></div>
+      <div class="field"><label>Drive power <output id="o-fs"></output></label><input type="range" data-k="fs" min="40" max="100" step="5"></div>
+      <div class="field"><label>Reverse back <output id="o-tb"></output></label><input type="range" data-k="tb" min="0" max="10000" step="100"></div>
+      <div class="sw"><div><div class="t">Reverse step</div><div class="d">Drive back after spraying</div></div><button class="toggle" id="b-rev" role="switch" aria-label="Reverse step"></button></div>
+      <h3>Manual and detection</h3>
+      <div class="field"><label>Manual max power <output id="o-ms"></output></label><input type="range" data-k="ms" min="40" max="100" step="5"></div>
+      <div class="field"><label>Flame sensitivity <output id="o-sens"></output></label><input type="range" data-k="sens" min="1" max="10" step="1"></div>
+      <div class="sw"><div><div class="t">Flicker check</div><div class="d">Ignore steady lights such as lamps</div></div><button class="toggle" id="b-flick" role="switch" aria-label="Flicker check"></button></div>
+      <p class="note">Every change is saved on the robot straight away. A time of 0 skips that step.</p>
+      <h3>Firmware</h3>
+      <div><button class="btn" id="b-ota">Start update mode</button></div>
+      <p class="note">Update mode turns on the robot's Wi-Fi only for an upload: join "FireBot-Update" (password firebot123), open 192.168.4.1. The robot restarts in Bluetooth mode afterwards.</p>
+    </div>
+  </div>
+</div>
+
+<div class="gate" id="gate">
+  <h1>FIREBOT</h1>
+  <p>Tap to go full screen, then connect to the robot over Bluetooth. Switch the robot on first.</p>
+  <button class="btn primary" id="b-gate">Connect to FireBot</button>
+  <div class="err" id="gerr"></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const SVC='6e400001-b5a3-f393-e0a9-e50e24dcca9e', CMD='6e400002-b5a3-f393-e0a9-e50e24dcca9e',
+      STA='6e400003-b5a3-f393-e0a9-e50e24dcca9e', CFG='6e400004-b5a3-f393-e0a9-e50e24dcca9e';
+let dev=null, cCmd=null, lastStatusAt=0, st={}, cfg={};
+
+// ---------- full screen + landscape on any tap ----------
+async function immersive(){
+  try{ if(!document.fullscreenElement) await document.documentElement.requestFullscreen({navigationUI:'hide'}); }catch(e){}
+  try{ await screen.orientation.lock('landscape'); }catch(e){}
+  try{ if('wakeLock' in navigator && !window._wl) window._wl=await navigator.wakeLock.request('screen'); }catch(e){}
+  audioInit();
+}
+document.addEventListener('pointerdown',()=>{ if(!document.fullscreenElement) immersive(); },{capture:true});
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) window._wl=null; });
+
+// ---------- BLE ----------
+let writeChain=Promise.resolve(), pendingHold=null;
+function send(c){
+  if(!cCmd) return;
+  const data=new TextEncoder().encode(c);
+  writeChain=writeChain.then(()=>cCmd.writeValueWithoutResponse(data)).catch(()=>{});
+}
+async function connect(){
+  $('gerr').textContent='';
+  if(!navigator.bluetooth){ $('gerr').textContent='This browser has no Bluetooth. Use Chrome on Android.'; return; }
+  try{
+    dev=await navigator.bluetooth.requestDevice({filters:[{name:'FireBot'},{services:[SVC]}],optionalServices:[SVC]});
+    dev.addEventListener('gattserverdisconnected',onDisc);
+    setLink('Connecting…','');
+    const gatt=await dev.gatt.connect();
+    const svc=await gatt.getPrimaryService(SVC);
+    cCmd=await svc.getCharacteristic(CMD);
+    const cs=await svc.getCharacteristic(STA), cc=await svc.getCharacteristic(CFG);
+    cs.addEventListener('characteristicvaluechanged',e=>onStatus(e.target.value));
+    cc.addEventListener('characteristicvaluechanged',e=>onConfig(e.target.value));
+    await cs.startNotifications(); await cc.startNotifications();
+    onStatus(await cs.readValue()); onConfig(await cc.readValue());
+    $('gate').classList.add('hide'); $('b-conn').textContent='Disconnect';
+  }catch(e){ $('gerr').textContent=(e&&e.message)||'Could not connect'; setLink('Not connected',''); }
+}
+function onDisc(){ cCmd=null; allStop(false); setLink('Disconnected','');
+  $('b-conn').textContent='Connect'; $('gate').classList.remove('hide'); $('gerr').textContent='Connection lost. Tap to reconnect.'; }
+$('b-gate').onclick=()=>connect();      // full screen already happened on pointerdown
+$('b-conn').onclick=()=>{ if(dev&&dev.gatt.connected){ dev.gatt.disconnect(); } else connect(); };
+function setLink(t,cls){ $('ltxt').textContent=t; $('ldot').className='dot '+cls; }
+
+const dec=new TextDecoder();
+function onStatus(v){ try{ st=JSON.parse(dec.decode(v)); }catch(e){ return; } lastStatusAt=performance.now(); render(); }
+function onConfig(v){ try{ cfg=JSON.parse(dec.decode(v)); }catch(e){ return; } renderCfg(); }
+
+// heartbeat watch
+setInterval(()=>{
+  if(!cCmd){ $('hb').textContent=''; return; }
+  const age=(performance.now()-lastStatusAt)/1000;
+  if(age<1.2) setLink('Connected','live'); else setLink('No reply '+age.toFixed(0)+' s','stale');
+  $('hb').textContent=st.h!==undefined?'#'+st.h:'';
+},300);
+
+// ---------- status ----------
+const STEPS=['SCAN_L','SCAN_R','SCAN_C','ALARM','FORWARD','PUMP','REVERSE'];
+const LABEL={SCAN_L:'Left',SCAN_R:'Right',SCAN_C:'Centre',ALARM:'Alarm',FORWARD:'Forward',PUMP:'Spray',REVERSE:'Reverse'};
+$('steps').innerHTML=STEPS.map(s=>'<span data-s="'+s+'">'+LABEL[s]+'</span>').join('');
+function render(){
+  const s=st.s||'IDLE', armed=!!st.a, fire=!!st.f;
+  $('st-step').textContent=s+(st.t?' · TEST':'');
+  // While scanning the phone deliberately shows only "Working": fire is announced at ALARM.
+  const box=$('status'); box.className='status'+(fire?' fire':armed?' armed':'');
+  const idx=STEPS.indexOf(s), showFrom=STEPS.indexOf('ALARM');
+  let big, sub;
+  if(fire){ big='FIRE DETECTED'; sub= s==='ALARM'?'Sounding alarm':s==='FORWARD'?'Approaching':s==='PUMP'?'Spraying':s==='REVERSE'?'Backing off':'Routine finished'; }
+  else if(idx>=0 && idx<showFrom){ big='ARMED'; sub='Working…'; }
+  else if(armed){ big='ARMED'; sub='Watching for fire'; }
+  else { big='DISARMED'; sub='Arm to let the robot react to fire.'; }
+  $('big').textContent=big; $('sub').textContent=sub;
+  document.querySelectorAll('#steps span').forEach((e,i)=>{
+    const visible = fire || st.t;                  // hide scan progress until the alarm
+    e.className= visible && i===idx ? 'on' : (visible && idx>i ? 'done' : '');
+  });
+  $('b-arm').classList.toggle('on',armed); $('b-arm').textContent=armed?'ARMED':'ARM';
+  setToggle('b-led',!!st.l);
+  $('vdot').className='dot'+(st.v?' flame':''); $('vtxt').textContent=armed?'Camera: watching':(st.v?'Camera: flame in view':'Camera: no flame');
+  if(st.c===0) $('vtxt').textContent='Camera not working';
+  siren(s==='ALARM' && fire);
+  if(!fire && !armed && s==='IDLE') document.title='FireBot Control'; else if(fire) document.title='🔥 FIRE DETECTED';
+}
+function setToggle(id,on){ const e=$(id); e.classList.toggle('on',on); e.setAttribute('aria-checked',on?'true':'false'); }
+
+// ---------- settings ----------
+const fmt=(k,v)=>(['ts','fs','ms'].includes(k)?v+' %':k==='sens'?v+' / 10':(v/1000).toFixed(1)+' s');
+const timers={};
+document.querySelectorAll('[data-k]').forEach(r=>{
+  r.oninput=()=>{ const k=r.dataset.k; $('o-'+k).textContent=fmt(k,+r.value);
+    clearTimeout(timers[k]); timers[k]=setTimeout(()=>send('set='+k+','+r.value),250); };
+});
+function renderCfg(){
+  document.querySelectorAll('[data-k]').forEach(r=>{ const k=r.dataset.k; if(cfg[k]===undefined||document.activeElement===r) return;
+    r.value=cfg[k]; $('o-'+k).textContent=fmt(k,cfg[k]); });
+  setToggle('b-rev',!!cfg.rev); setToggle('b-flick',!!cfg.flick);
+}
+$('b-rev').onclick=()=>send('set=rev,'+($('b-rev').classList.contains('on')?0:1));
+$('b-flick').onclick=()=>send('set=flick,'+($('b-flick').classList.contains('on')?0:1));
+$('b-set').onclick=()=>{ $('sheet').classList.add('open'); $('sheet').setAttribute('aria-hidden','false'); send('cfg'); };
+$('b-close').onclick=()=>{ $('sheet').classList.remove('open'); $('sheet').setAttribute('aria-hidden','true'); };
+$('sheet').onclick=e=>{ if(e.target===$('sheet')) $('b-close').onclick(); };
+$('b-ota').onclick=()=>{ if(confirm('Turn on the robot\'s Wi-Fi for a firmware upload? Bluetooth control stops until it restarts.')) send('ota'); };
+
+// ---------- actions ----------
+$('b-arm').onclick=()=>send('arm='+(st.a?0:1));
+$('b-stop').onclick=()=>{ allStop(true); send('stop'); };
+$('b-led').onclick=()=>send('led='+(st.l?0:1));
+$('b-siren').onclick=()=>{ const on=!$('b-siren').classList.contains('on'); setToggle('b-siren',on); if(!on) sirenStop(); };
+$('b-test').onclick=()=>{ if(confirm('Run the whole routine now? The robot will turn, drive and spray.')) send('test'); };
+
+// hold-to-act: repeat every 150 ms; the robot stops on its own 0.8 s after the last one
+function holder(onCmd,offCmd,el){
+  let t=null;
+  return {start(){ if(t) return; send(onCmd()); t=setInterval(()=>send(onCmd()),150); el&&el.classList.add('held'); },
+          stop(){ if(!t) return; clearInterval(t); t=null; el&&el.classList.remove('held'); send(offCmd); },
+          get on(){ return !!t; }};
+}
+let mvCmd='0,0', mvEl=null;
+const drv=holder(()=>'mv='+mvCmd,'mv=0,0');
+function mvStart(v,el){
+  if(v==='0,0'){ mvStop(); send('mv=0,0'); return; }
+  mvEl&&mvEl.classList.remove('held'); mvCmd=v; mvEl=el; el.classList.add('held');
+  if(drv.on) send('mv='+v); else drv.start();
+}
+function mvStop(){ mvEl&&mvEl.classList.remove('held'); mvEl=null; drv.stop(); }
+const pmp=holder(()=>'ph=1','ph=0',$('b-pump'));
+function bindHold(el,down,up){
+  el.addEventListener('pointerdown',e=>{ e.preventDefault(); el.setPointerCapture(e.pointerId); down(); });
+  ['pointerup','pointercancel','lostpointercapture'].forEach(ev=>el.addEventListener(ev,up));
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+}
+document.querySelectorAll('[data-mv]').forEach(b=>bindHold(b,()=>mvStart(b.dataset.mv,b),mvStop));
+bindHold($('b-pump'),()=>pmp.start(),()=>pmp.stop());
+function allStop(sendIt){ mvStop(); pmp.stop(); }
+addEventListener('blur',()=>allStop()); document.addEventListener('visibilitychange',()=>{ if(document.hidden) allStop(); });
+
+// ---------- siren (Web Audio on the phone) ----------
+let ac=null, osc=null, gn=null, sweepT=null;
+function audioInit(){ try{ if(!ac) ac=new (window.AudioContext||window.webkitAudioContext)(); if(ac.state==='suspended') ac.resume(); }catch(e){} }
+function sirenStart(){
+  if(osc||!ac||!$('b-siren').classList.contains('on')) return;
+  osc=ac.createOscillator(); gn=ac.createGain(); osc.type='sawtooth'; gn.gain.value=0.22;
+  osc.connect(gn).connect(ac.destination); osc.start();
+  const sw=()=>{ const t=ac.currentTime; osc.frequency.cancelScheduledValues(t);
+    osc.frequency.setValueAtTime(650,t); osc.frequency.linearRampToValueAtTime(1350,t+0.4); osc.frequency.linearRampToValueAtTime(650,t+0.8); };
+  sw(); sweepT=setInterval(sw,800);
+  if(navigator.vibrate) navigator.vibrate([300,100,300]);
+}
+function sirenStop(){ if(!osc) return; clearInterval(sweepT); try{osc.stop();}catch(e){} osc.disconnect(); osc=null; }
+function siren(on){ on?sirenStart():sirenStop(); }
+
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body></html>
