@@ -202,9 +202,12 @@ input[type=range]{width:100%;height:28px;accent-color:var(--accent);margin:0}
   <h1>FIREBOT</h1>
   <p>Tap to go full screen, then connect to the robot over Bluetooth. Switch the robot on first.</p>
   <button class="btn primary" id="b-gate">Connect to FireBot</button>
+  <a class="btn" id="b-apk" href="firebot.apk" download>Download Android app (APK)</a>
   <div class="err" id="gerr"></div>
 </div>
 
+<script src="capacitor.js"></script>
+<script src="ble-plugin.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const SVC='6e400001-b5a3-f393-e0a9-e50e24dcca9e', CMD='6e400002-b5a3-f393-e0a9-e50e24dcca9e',
@@ -221,35 +224,56 @@ async function immersive(){
 document.addEventListener('pointerdown',()=>{ if(!document.fullscreenElement) immersive(); },{capture:true});
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) window._wl=null; });
 
-// ---------- BLE ----------
-let writeChain=Promise.resolve(), pendingHold=null;
+// ---------- BLE: native plugin inside the app, Web Bluetooth in a browser ----------
+const NATIVE = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
+const BLE = NATIVE ? capacitorCommunityBluetoothLe.BleClient : null;
+let writeChain=Promise.resolve(), linkUp=false, nativeId=null;
 function send(c){
-  if(!cCmd) return;
+  if(!linkUp) return;
   const data=new TextEncoder().encode(c);
-  writeChain=writeChain.then(()=>cCmd.writeValueWithoutResponse(data)).catch(()=>{});
+  writeChain=writeChain.then(()=> NATIVE
+      ? BLE.writeWithoutResponse(nativeId,SVC,CMD,new DataView(data.buffer))
+      : cCmd.writeValueWithoutResponse(data)).catch(()=>{});
 }
 async function connect(){
   $('gerr').textContent='';
-  if(!navigator.bluetooth){ $('gerr').textContent='This browser has no Bluetooth. Use Chrome on Android.'; return; }
   try{
-    dev=await navigator.bluetooth.requestDevice({filters:[{name:'FireBot'},{services:[SVC]}],optionalServices:[SVC]});
-    dev.addEventListener('gattserverdisconnected',onDisc);
-    setLink('Connecting…','');
-    const gatt=await dev.gatt.connect();
-    const svc=await gatt.getPrimaryService(SVC);
-    cCmd=await svc.getCharacteristic(CMD);
-    const cs=await svc.getCharacteristic(STA), cc=await svc.getCharacteristic(CFG);
-    cs.addEventListener('characteristicvaluechanged',e=>onStatus(e.target.value));
-    cc.addEventListener('characteristicvaluechanged',e=>onConfig(e.target.value));
-    await cs.startNotifications(); await cc.startNotifications();
-    onStatus(await cs.readValue()); onConfig(await cc.readValue());
+    if(NATIVE){
+      await BLE.initialize({androidNeverForLocation:true});
+      if(!(await BLE.isEnabled())){ try{ await BLE.requestEnable(); }catch(e){} }
+      const d=await BLE.requestDevice({namePrefix:'FireBot',optionalServices:[SVC]});
+      nativeId=d.deviceId; setLink('Connecting…','');
+      await BLE.connect(nativeId,()=>onDisc());
+      await BLE.startNotifications(nativeId,SVC,STA,v=>onStatus(v));
+      await BLE.startNotifications(nativeId,SVC,CFG,v=>onConfig(v));
+      linkUp=true;
+      onStatus(await BLE.read(nativeId,SVC,STA)); onConfig(await BLE.read(nativeId,SVC,CFG));
+    }else{
+      if(!navigator.bluetooth){ $('gerr').textContent='This browser has no Bluetooth. Install the FireBot app.'; return; }
+      dev=await navigator.bluetooth.requestDevice({filters:[{name:'FireBot'},{services:[SVC]}],optionalServices:[SVC]});
+      dev.addEventListener('gattserverdisconnected',onDisc);
+      setLink('Connecting…','');
+      const gatt=await dev.gatt.connect();
+      const svc=await gatt.getPrimaryService(SVC);
+      cCmd=await svc.getCharacteristic(CMD);
+      const cs=await svc.getCharacteristic(STA), cc=await svc.getCharacteristic(CFG);
+      cs.addEventListener('characteristicvaluechanged',e=>onStatus(e.target.value));
+      cc.addEventListener('characteristicvaluechanged',e=>onConfig(e.target.value));
+      await cs.startNotifications(); await cc.startNotifications();
+      linkUp=true;
+      onStatus(await cs.readValue()); onConfig(await cc.readValue());
+    }
     $('gate').classList.add('hide'); $('b-conn').textContent='Disconnect';
-  }catch(e){ $('gerr').textContent=(e&&e.message)||'Could not connect'; setLink('Not connected',''); }
+  }catch(e){ linkUp=false; $('gerr').textContent=(e&&e.message)||'Could not connect'; setLink('Not connected',''); }
 }
-function onDisc(){ cCmd=null; allStop(false); setLink('Disconnected','');
+async function disconnect(){
+  try{ if(NATIVE&&nativeId) await BLE.disconnect(nativeId); else if(dev&&dev.gatt.connected) dev.gatt.disconnect(); }catch(e){}
+  onDisc();
+}
+function onDisc(){ linkUp=false; cCmd=null; allStop(false); setLink('Disconnected','');
   $('b-conn').textContent='Connect'; $('gate').classList.remove('hide'); $('gerr').textContent='Connection lost. Tap to reconnect.'; }
-$('b-gate').onclick=()=>connect();      // full screen already happened on pointerdown
-$('b-conn').onclick=()=>{ if(dev&&dev.gatt.connected){ dev.gatt.disconnect(); } else connect(); };
+$('b-gate').onclick=()=>connect();
+$('b-conn').onclick=()=>{ if(linkUp) disconnect(); else connect(); };
 function setLink(t,cls){ $('ltxt').textContent=t; $('ldot').className='dot '+cls; }
 
 const dec=new TextDecoder();
@@ -258,7 +282,7 @@ function onConfig(v){ try{ cfg=JSON.parse(dec.decode(v)); }catch(e){ return; } r
 
 // heartbeat watch
 setInterval(()=>{
-  if(!cCmd){ $('hb').textContent=''; return; }
+  if(!linkUp){ $('hb').textContent=''; return; }
   const age=(performance.now()-lastStatusAt)/1000;
   if(age<1.2) setLink('Connected','live'); else setLink('No reply '+age.toFixed(0)+' s','stale');
   $('hb').textContent=st.h!==undefined?'#'+st.h:'';
@@ -360,6 +384,7 @@ function sirenStart(){
 function sirenStop(){ if(!osc) return; clearInterval(sweepT); try{osc.stop();}catch(e){} osc.disconnect(); osc=null; }
 function siren(on){ on?sirenStart():sirenStop(); }
 
-if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+if(NATIVE) $('b-apk').style.display='none';
+if(!NATIVE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
 </body></html>
