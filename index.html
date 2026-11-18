@@ -272,6 +272,7 @@ async function connect(){
       const d=await BLE.requestDevice({namePrefix:'FireBot',optionalServices:[SVC]});
       nativeId=d.deviceId; setLink('Connecting…','');
       await BLE.connect(nativeId,()=>onDisc());
+      try{ await BLE.discoverServices(nativeId); }catch(e){}   // clear Android's cached channel list
       await BLE.startNotifications(nativeId,SVC,STA,v=>onStatus(v));
       await BLE.startNotifications(nativeId,SVC,CFG,v=>onConfig(v));
       try{ const sv=await BLE.getServices(nativeId);
