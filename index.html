@@ -238,7 +238,7 @@ input[type=range]{width:100%;height:28px;accent-color:var(--accent);margin:0}
   <h1>FIREBOT</h1>
   <p>Tap to go full screen, then connect to the robot over Bluetooth. Switch the robot on first.</p>
   <button class="btn primary" id="b-gate">Connect to FireBot</button>
-  <a class="btn" id="b-apk" href="firebot-1.4.apk" download>Download Android app v1.4 (APK)</a>
+  <a class="btn" id="b-apk" href="firebot-1.5.apk" download>Download Android app v1.5 (APK)</a>
   <div class="err" id="gerr"></div>
 </div>
 
@@ -264,13 +264,15 @@ document.addEventListener('visibilitychange',()=>{ if(!document.hidden) window._
 // ---------- BLE: native plugin inside the app, Web Bluetooth in a browser ----------
 const NATIVE = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
 const BLE = NATIVE ? capacitorCommunityBluetoothLe.BleClient : null;
-let writeChain=Promise.resolve(), linkUp=false, nativeId=null, hasAim=null, cAim=null;
+let pendingWrites=0, writeChain=Promise.resolve(), linkUp=false, nativeId=null, hasAim=null, cAim=null;
 function send(c){
   if(!linkUp) return;
+  if(pendingWrites>=2 && /^(mv|ph|aim)=/.test(c)) return;   // link busy: skip, the next tick resends
   const data=new TextEncoder().encode(c);
-  writeChain=writeChain.then(()=> NATIVE
+  pendingWrites++;
+  writeChain=writeChain.finally(()=>{}).then(()=> NATIVE
       ? BLE.writeWithoutResponse(nativeId,SVC,CMD,new DataView(data.buffer))
-      : cCmd.writeValueWithoutResponse(data)).catch(()=>{});
+      : cCmd.writeValueWithoutResponse(data)).catch(()=>{}).finally(()=>pendingWrites--);
 }
 async function connect(){
   $('gerr').textContent='';
@@ -434,12 +436,13 @@ function drawAim(){
 addEventListener('resize',()=>{ if(tab==='aim') drawAim(); });
 let aimBusy=false;
 setInterval(async()=>{                       // read directly too: works even if notifications don't
-  if(tab!=='aim'||!linkUp||aimBusy||hasAim===false) return;
+  if((tab!=='aim'&&!A.mode)||!linkUp||aimBusy||hasAim===false) return;
+  if(performance.now()-aimAt<700) return;            // notifications are flowing: no need to poll
   aimBusy=true;
   try{ const v = NATIVE ? await BLE.read(nativeId,SVC,AIM) : (cAim ? await cAim.readValue() : null); if(v) onAim(v); }
   catch(e){ if(NATIVE) hasAim=false; }
   aimBusy=false;
-},250);
+},400);
 setInterval(()=>{ if((tab==='aim'||A.mode)&&linkUp) send('aim=1'); },2000);   // keep the robot's aim stream on
 
 // ---------- app-side autonomy: Follow + Smart routine ----------
@@ -474,13 +477,14 @@ $('b-follow').onclick=()=> A.mode==='follow'?autoStop():autoStart('follow');
 $('b-smart').onclick=()=> A.mode==='smart'?autoStop():autoStart('smart');
 const SPIN=d=> d>0?'1,-1':'-1,1';
 function aimTurn(e){                     // turn toward bearing e: full spin far out, pulsed near centre
-  const far=Math.abs(e)>0.35; return (far || A.tick%3!==2) ? SPIN(e) : '0,0';
+  const far=Math.abs(e)>0.45; return (far || (performance.now()%600)<250) ? SPIN(e) : '0,0';   // far: keep turning; near: 0.25 s nudges
 }
-function seekOrWait(now,limit){          // flame gone: brief pause, then turn the way it left
-  if(now-A.lastSeen<400) return '0,0';
+function seekOrWait(now,limit){          // flame gone: turn 0.3 s, look 0.6 s, repeat toward the side it left
+  if(now-A.lastSeen<500) return '0,0';
   if(!A.lostAt) A.lostAt=now;
-  if(now-A.lostAt>limit) return null;    // give up
-  return SPIN(A.lastE||1);
+  const t=now-A.lostAt;
+  if(t>limit) return null;               // give up
+  return (t%900)<300 ? SPIN(A.lastE||1) : '0,0';
 }
 setInterval(()=>{
   if(!A.mode) return;
@@ -493,7 +497,7 @@ setInterval(()=>{
     if(f){ if(Math.abs(f.e)>0.15){ cmd=aimTurn(f.e); label='Turning to flame'; }
            else if(f.w<stopW()){ cmd='1,1'; label='Approaching ('+f.w+' %)'; }
            else { label='Close: holding'; } }
-    else { const c=seekOrWait(now,6000); if(c===null){ label='Lost the flame: waiting'; } else { cmd=c; label=cmd==='0,0'?'Flame gone…':'Searching '+(A.lastE>0?'right':'left'); } }
+    else { const c=seekOrWait(now,8000); if(c===null){ label='Lost the flame: waiting'; } else { cmd=c; label=cmd==='0,0'?'Flame gone…':'Searching '+(A.lastE>0?'right':'left'); } }
   } else {                                // smart routine
     const go=s=>{ A.step=s; A.t0=now; A.lostAt=0; };
     switch(A.step){
@@ -505,7 +509,7 @@ setInterval(()=>{
       case 'FORWARD': {
         if(f && Math.abs(f.e)<=0.25){ cmd='1,1'; A.fwdDone+=100; label='FIRE · approaching '+Math.round(A.fwdDone/100)/10+' s'; }
         else if(f){ cmd=aimTurn(f.e); label='FIRE · re-centring'; }
-        else { const c=seekOrWait(now,6000); if(c===null){ autoStop('Lost the flame: routine stopped'); return; } cmd=c; label='FIRE · searching '+(A.lastE>0?'right':'left'); }
+        else { const c=seekOrWait(now,8000); if(c===null){ autoStop('Lost the flame: routine stopped'); return; } cmd=c; label='FIRE · searching '+(A.lastE>0?'right':'left'); }
         if(A.fwdDone>=cfg.tf) go('PUMP');
         break; }
       case 'PUMP':
@@ -516,8 +520,9 @@ setInterval(()=>{
       case 'DONE': autoStop('Smart routine finished'); return;
     }
   }
-  if(cmd!=='0,0'||A.sent!=='0,0') send('mv='+cmd); A.sent=cmd;
-  if(pump){ send('ph=1'); A.pumpOn=true; } else if(A.pumpOn){ send('ph=0'); A.pumpOn=false; }
+  if(cmd!==A.sent || (cmd!=='0,0' && A.tick%4===0)) send('mv='+cmd);   // on change + keep-alive (robot stops after 0.8 s)
+  A.sent=cmd;
+  if(pump){ if(!A.pumpOn||A.tick%4===0) send('ph=1'); A.pumpOn=true; } else if(A.pumpOn){ send('ph=0'); A.pumpOn=false; }
   $('autost').textContent=(A.mode==='smart'?'SMART · ':'FOLLOW · ')+label;
   if(A.mode==='smart'){ $('big').textContent=A.step==='WAIT'||A.step.startsWith('SCAN')?'ARMED (APP)':'FIRE DETECTED';
     $('status').className='status'+(['WAIT','SCAN_L','SCAN_R','SCAN_C'].includes(A.step)?' armed':' fire'); $('sub').textContent=label; }
