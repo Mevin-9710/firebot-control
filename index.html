@@ -108,6 +108,9 @@ button,input{font:inherit;color:inherit}
 .aimhint{font-size:15px;font-weight:700;line-height:1.35;min-height:44px}
 .legend{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink-2)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:middle}
+.autobox{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg)}
+.autobox .row .btn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.autost{font:600 13px var(--mono);color:var(--ink-2)}
 .hint{margin:4px 0 0;color:var(--ink-3);font-size:12px;line-height:1.5}
 .field label{display:flex;justify-content:space-between;font-weight:600;font-size:13px;margin:8px 0 4px}
 .field output{font-family:var(--mono);color:var(--ink-2);font-weight:500}
@@ -195,7 +198,13 @@ input[type=range]{width:100%;height:28px;accent-color:var(--accent);margin:0}
         <div class="legend"><span><i style="background:var(--accent)"></i>Confirmed flame</span><span><i style="background:var(--ink-3)"></i>Bright, not confirmed</span></div>
         <div class="sw"><div><div class="t">Mirror view</div><div class="d">Left and right swapped on screen</div></div><button class="toggle" id="b-amir" role="switch" aria-label="Mirror view"></button></div>
         <div class="sw"><div><div class="t">Flip view</div><div class="d">Camera mounted upside down</div></div><button class="toggle" id="b-aflip" role="switch" aria-label="Flip view"></button></div>
-        <p class="hint">The box is the whole camera picture. A confirmed flame anywhere in it starts the routine when armed. Positions are only shown while disarmed.</p>
+        <div class="autobox">
+          <div class="row"><button class="btn" id="b-follow">Follow flame</button><button class="btn primary" id="b-smart">Smart routine</button></div>
+          <div class="autost" id="autost">Off</div>
+          <div class="field"><label for="stopw">Follow: stop when flame width reaches <output id="o-stopw"></output></label><input type="range" id="stopw" min="4" max="40" step="1"></div>
+        </div>
+        <p class="hint"><b>Follow flame</b> turns toward the flame and creeps closer; if it leaves the view it turns the way it went. <b>Smart routine</b> waits for a flame, then runs your routine (scan, alarm, forward, spray, reverse) and turns back to the flame whenever it drifts off-centre. Both are run by this phone: keep the app open. STOP or any drive button cancels.</p>
+        <p class="hint">The box is the whole camera picture. Set Mirror/Flip so the dot moves the same way as the flame.</p>
       </div>
     </div>
   </section>
@@ -229,7 +238,7 @@ input[type=range]{width:100%;height:28px;accent-color:var(--accent);margin:0}
   <h1>FIREBOT</h1>
   <p>Tap to go full screen, then connect to the robot over Bluetooth. Switch the robot on first.</p>
   <button class="btn primary" id="b-gate">Connect to FireBot</button>
-  <a class="btn" id="b-apk" href="firebot-1.3.apk" download>Download Android app v1.3 (APK)</a>
+  <a class="btn" id="b-apk" href="firebot-1.4.apk" download>Download Android app v1.4 (APK)</a>
   <div class="err" id="gerr"></div>
 </div>
 
@@ -330,14 +339,14 @@ function render(){
   const s=st.s||'IDLE', armed=!!st.a, fire=!!st.f;
   $('st-step').textContent=s+(st.t?' · TEST':'');
   // While scanning the phone deliberately shows only "Working": fire is announced at ALARM.
-  const box=$('status'); box.className='status'+(fire?' fire':armed?' armed':'');
+  const box=$('status'); if(!(A.mode==='smart')) box.className='status'+(fire?' fire':armed?' armed':'');
   const idx=STEPS.indexOf(s), showFrom=STEPS.indexOf('ALARM');
   let big, sub;
   if(fire){ big='FIRE DETECTED'; sub= s==='ALARM'?'Sounding alarm':s==='FORWARD'?'Approaching':s==='PUMP'?'Spraying':s==='REVERSE'?'Backing off':'Routine finished'; }
   else if(idx>=0 && idx<showFrom){ big='ARMED'; sub='Working…'; }
   else if(armed){ big='ARMED'; sub='Watching for fire'; }
   else { big='DISARMED'; sub='Arm to let the robot react to fire.'; }
-  $('big').textContent=big; $('sub').textContent=sub;
+  if(!A.mode||A.mode!=='smart'){ $('big').textContent=big; $('sub').textContent=sub; }
   document.querySelectorAll('#steps span').forEach((e,i)=>{
     const visible = fire || st.t;                  // hide scan progress until the alarm
     e.className= visible && i===idx ? 'on' : (visible && idx>i ? 'done' : '');
@@ -431,13 +440,94 @@ setInterval(async()=>{                       // read directly too: works even if
   catch(e){ if(NATIVE) hasAim=false; }
   aimBusy=false;
 },250);
-setInterval(()=>{ if(tab==='aim'&&linkUp) send('aim=1'); },2000);   // keep the robot's aim stream on
+setInterval(()=>{ if((tab==='aim'||A.mode)&&linkUp) send('aim=1'); },2000);   // keep the robot's aim stream on
+
+// ---------- app-side autonomy: Follow + Smart routine ----------
+// Steering runs here on the phone from the robot's aim data (~8 updates/s) and
+// the same hold-to-drive commands as the pad, so the robot's own watchdog still
+// stops everything if this app closes or the link drops.
+let appAlarm=false;
+const A={mode:null, step:'', t0:0, fwdDone:0, lastE:0, lastSeen:0, tick:0, sent:'0,0', pumpOn:false, lostAt:0};
+const stopW=()=>+($('stopw').value||14);
+$('stopw').value=localStorage.getItem('stopW')||14; $('o-stopw').textContent=$('stopw').value+' %';
+$('stopw').oninput=()=>{ localStorage.setItem('stopW',$('stopw').value); $('o-stopw').textContent=$('stopw').value+' %'; };
+function bestFlame(){
+  if(!linkUp || performance.now()-aimAt>600 || aim.a) return null;
+  let b=null;
+  (aim.k||[]).forEach(t=>{ let [x,y,w,h,ok]=t; if(!ok) return; if(AIMV.mir) x=100-x; if(!b||w>b.w) b={e:(x-50)/50,w}; });
+  return b;
+}
+function autoStart(mode){
+  if(!linkUp){ $('autost').textContent='Connect first'; return; }
+  allStop(); send('arm=0'); send('aim=1');
+  Object.assign(A,{mode, step: mode==='smart'?'WAIT':'FOLLOW', t0:performance.now(), fwdDone:0, lastSeen:0, sent:'0,0', pumpOn:false});
+  appAlarm=false; autoUI();
+}
+function autoStop(msg){
+  A.mode=null; A.step=''; appAlarm=false; siren(false);
+  send('mv=0,0'); if(A.pumpOn){ send('ph=0'); A.pumpOn=false; }
+  $('autost').textContent=msg||'Off'; autoUI();
+}
+function autoUI(){ $('b-follow').classList.toggle('on',A.mode==='follow'); $('b-smart').classList.toggle('on',A.mode==='smart');
+  $('b-follow').textContent=A.mode==='follow'?'Stop following':'Follow flame'; $('b-smart').textContent=A.mode==='smart'?'Stop routine':'Smart routine'; }
+$('b-follow').onclick=()=> A.mode==='follow'?autoStop():autoStart('follow');
+$('b-smart').onclick=()=> A.mode==='smart'?autoStop():autoStart('smart');
+const SPIN=d=> d>0?'1,-1':'-1,1';
+function aimTurn(e){                     // turn toward bearing e: full spin far out, pulsed near centre
+  const far=Math.abs(e)>0.35; return (far || A.tick%3!==2) ? SPIN(e) : '0,0';
+}
+function seekOrWait(now,limit){          // flame gone: brief pause, then turn the way it left
+  if(now-A.lastSeen<400) return '0,0';
+  if(!A.lostAt) A.lostAt=now;
+  if(now-A.lostAt>limit) return null;    // give up
+  return SPIN(A.lastE||1);
+}
+setInterval(()=>{
+  if(!A.mode) return;
+  if(!linkUp){ autoStop('Connection lost: stopped'); return; }
+  A.tick++;
+  const now=performance.now(), f=bestFlame();
+  if(f){ A.lastE=f.e; A.lastSeen=now; A.lostAt=0; }
+  const el=now-A.t0; let cmd='0,0', pump=false, label='';
+  if(A.mode==='follow'){
+    if(f){ if(Math.abs(f.e)>0.15){ cmd=aimTurn(f.e); label='Turning to flame'; }
+           else if(f.w<stopW()){ cmd='1,1'; label='Approaching ('+f.w+' %)'; }
+           else { label='Close: holding'; } }
+    else { const c=seekOrWait(now,6000); if(c===null){ label='Lost the flame: waiting'; } else { cmd=c; label=cmd==='0,0'?'Flame gone…':'Searching '+(A.lastE>0?'right':'left'); } }
+  } else {                                // smart routine
+    const go=s=>{ A.step=s; A.t0=now; A.lostAt=0; };
+    switch(A.step){
+      case 'WAIT': label='Armed (app): watching for fire'; if(f) go('SCAN_L'); break;
+      case 'SCAN_L': cmd='-1,1'; label='Working…'; if(el>=cfg.tl) go('SCAN_R'); break;
+      case 'SCAN_R': cmd='1,-1'; label='Working…'; if(el>=cfg.tr) go('SCAN_C'); break;
+      case 'SCAN_C': cmd='-1,1'; label='Working…'; if(el>=cfg.tc){ go('ALARM'); appAlarm=true; siren(true); if(navigator.vibrate) navigator.vibrate([300,100,300]); } break;
+      case 'ALARM': label='FIRE DETECTED'; if(el>=cfg.ta){ appAlarm=false; siren(false); A.fwdDone=0; go('FORWARD'); } break;
+      case 'FORWARD': {
+        if(f && Math.abs(f.e)<=0.25){ cmd='1,1'; A.fwdDone+=100; label='FIRE · approaching '+Math.round(A.fwdDone/100)/10+' s'; }
+        else if(f){ cmd=aimTurn(f.e); label='FIRE · re-centring'; }
+        else { const c=seekOrWait(now,6000); if(c===null){ autoStop('Lost the flame: routine stopped'); return; } cmd=c; label='FIRE · searching '+(A.lastE>0?'right':'left'); }
+        if(A.fwdDone>=cfg.tf) go('PUMP');
+        break; }
+      case 'PUMP':
+        pump=true; label='FIRE · spraying';
+        if(f && Math.abs(f.e)>0.35) cmd=aimTurn(f.e);      // keep aiming at it
+        if(el>=cfg.tp) go(cfg.rev?'REVERSE':'DONE'); break;
+      case 'REVERSE': cmd='-1,-1'; label='Backing off'; if(el>=cfg.tb) go('DONE'); break;
+      case 'DONE': autoStop('Smart routine finished'); return;
+    }
+  }
+  if(cmd!=='0,0'||A.sent!=='0,0') send('mv='+cmd); A.sent=cmd;
+  if(pump){ send('ph=1'); A.pumpOn=true; } else if(A.pumpOn){ send('ph=0'); A.pumpOn=false; }
+  $('autost').textContent=(A.mode==='smart'?'SMART · ':'FOLLOW · ')+label;
+  if(A.mode==='smart'){ $('big').textContent=A.step==='WAIT'||A.step.startsWith('SCAN')?'ARMED (APP)':'FIRE DETECTED';
+    $('status').className='status'+(['WAIT','SCAN_L','SCAN_R','SCAN_C'].includes(A.step)?' armed':' fire'); $('sub').textContent=label; }
+},100);
 setInterval(()=>{ if(tab==='aim') drawAim(); },500);
 $('b-ota').onclick=()=>{ if(confirm('Turn on the robot\'s Wi-Fi for a firmware upload? Bluetooth control stops until it restarts.')) send('ota'); };
 
 // ---------- actions ----------
 $('b-arm').onclick=()=>send('arm='+(st.a?0:1));
-$('b-stop').onclick=()=>{ allStop(true); send('stop'); };
+$('b-stop').onclick=()=>{ autoStop('Stopped'); allStop(true); send('stop'); };
 $('b-led').onclick=()=>send('led='+(st.l?0:1));
 $('b-siren').onclick=()=>{ const on=!$('b-siren').classList.contains('on'); setToggle('b-siren',on); if(!on) sirenStop(); };
 $('b-test').onclick=()=>{ if(confirm('Run the whole routine now? The robot will turn, drive and spray.')) send('test'); };
@@ -452,6 +542,7 @@ function holder(onCmd,offCmd,el){
 let mvCmd='0,0', mvEl=null;
 const drv=holder(()=>'mv='+mvCmd,'mv=0,0');
 function mvStart(v,el){
+  if(A.mode) autoStop('Manual drive: stopped');
   if(v==='0,0'){ mvStop(); send('mv=0,0'); return; }
   mvEl&&mvEl.classList.remove('held'); mvCmd=v; mvEl=el; el.classList.add('held');
   if(drv.on) send('mv='+v); else drv.start();
@@ -466,7 +557,8 @@ function bindHold(el,down,up){
 document.querySelectorAll('[data-mv]').forEach(b=>bindHold(b,()=>mvStart(b.dataset.mv,b),mvStop));
 bindHold($('b-pump'),()=>pmp.start(),()=>pmp.stop());
 function allStop(sendIt){ mvStop(); pmp.stop(); }
-addEventListener('blur',()=>allStop()); document.addEventListener('visibilitychange',()=>{ if(document.hidden) allStop(); });
+addEventListener('blur',()=>allStop());
+document.addEventListener('visibilitychange',()=>{ if(document.hidden && A.mode) autoStop('App left: stopped'); }); document.addEventListener('visibilitychange',()=>{ if(document.hidden) allStop(); });
 
 // ---------- siren (Web Audio on the phone) ----------
 let ac=null, osc=null, gn=null, sweepT=null;
@@ -481,7 +573,7 @@ function sirenStart(){
   if(navigator.vibrate) navigator.vibrate([300,100,300]);
 }
 function sirenStop(){ if(!osc) return; clearInterval(sweepT); try{osc.stop();}catch(e){} osc.disconnect(); osc=null; }
-function siren(on){ on?sirenStart():sirenStop(); }
+function siren(on){ (on||appAlarm)?sirenStart():sirenStop(); }
 
 if(NATIVE) $('b-apk').style.display='none';
 if(!NATIVE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
