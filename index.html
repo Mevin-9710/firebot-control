@@ -89,15 +89,26 @@ button,input{font:inherit;color:inherit}
 .toggle.on{background:var(--warn);border-color:var(--warn)}
 .toggle.on::after{transform:translateX(20px);background:#fff}
 
-/* settings sheet */
-.sheet{position:fixed;inset:0;z-index:20;display:none;background:#0008}
-.sheet.open{display:block}
-.sheet .box{position:absolute;right:0;top:0;bottom:0;width:min(560px,100%);background:var(--panel);border-left:1px solid var(--line);
-  display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) 0}
-.sheet header{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
-.sheet header b{font-size:15px}
-.sheet .body{overflow:auto;padding:12px 16px 24px;display:grid;grid-template-columns:1fr 1fr;gap:4px 20px}
-.sheet h3{grid-column:1/-1;margin:14px 0 2px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+/* tabs */
+.tabs{display:flex;gap:4px;padding:3px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2)}
+.tabs button{min-height:36px;padding:0 14px;border:0;border-radius:8px;background:transparent;color:var(--ink-2);font-weight:600;font-size:13px;cursor:pointer}
+.tabs button.on{background:var(--panel-2);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line-2)}
+.pane[hidden]{display:none!important}
+/* settings pane */
+#v-set{overflow:auto;min-height:0}
+.setbody{max-width:980px;margin:0 auto;padding:12px 16px 28px;display:grid;grid-template-columns:1fr 1fr;gap:4px 24px}
+.setbody h3{grid-column:1/-1;margin:14px 0 2px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+/* aim pane */
+#v-aim{padding:var(--gap);min-height:0}
+.aimgrid{height:100%;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:var(--gap)}
+.aimbox{position:relative;min-height:0;background:#05070a;border:1px solid var(--line);border-radius:var(--r3);overflow:hidden}
+.aimbox canvas{position:absolute;inset:0;width:100%;height:100%}
+.aimempty{position:absolute;inset:0;display:grid;place-items:center;color:var(--ink-3);text-align:center;padding:16px}
+.aiminfo{overflow:auto}
+.aimhint{font-size:15px;font-weight:700;line-height:1.35;min-height:44px}
+.legend{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink-2)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:middle}
+.hint{margin:4px 0 0;color:var(--ink-3);font-size:12px;line-height:1.5}
 .field label{display:flex;justify-content:space-between;font-weight:600;font-size:13px;margin:8px 0 4px}
 .field output{font-family:var(--mono);color:var(--ink-2);font-weight:500}
 input[type=range]{width:100%;height:28px;accent-color:var(--accent);margin:0}
@@ -116,7 +127,9 @@ input[type=range]{width:100%;height:28px;accent-color:var(--accent);margin:0}
   .app{height:auto;min-height:100dvh}
   .main{grid-template-columns:1fr}
   .pad{min-height:240px}
-  .sheet .body{grid-template-columns:1fr}
+  .setbody{grid-template-columns:1fr}
+  .aimgrid{grid-template-columns:1fr;height:auto}
+  .aimbox{aspect-ratio:4/3}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style></head>
@@ -126,11 +139,15 @@ input[type=range]{width:100%;height:28px;accent-color:var(--accent);margin:0}
     <div class="brand"><i></i>FIREBOT</div>
     <div class="link"><span class="dot" id="ldot"></span><span id="ltxt">Not connected</span><span class="hb" id="hb"></span></div>
     <div class="spacer"></div>
-    <button class="btn ghost" id="b-set" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="ctl" class="on">Control</button>
+      <button role="tab" data-tab="aim">Aim</button>
+      <button role="tab" data-tab="set">Settings</button>
+    </nav>
     <button class="btn" id="b-conn">Connect</button>
   </header>
 
-  <main class="main">
+  <main class="main pane" id="v-ctl">
     <section class="panel" aria-label="Drive">
       <h2>Drive <span>hold to move</span></h2>
       <div class="pad">
@@ -168,12 +185,22 @@ input[type=range]{width:100%;height:28px;accent-color:var(--accent);margin:0}
       <button class="btn" id="b-test">Run routine (test, no flame)</button>
     </section>
   </main>
-</div>
 
-<div class="sheet" id="sheet" aria-hidden="true">
-  <div class="box" role="dialog" aria-label="Settings">
-    <header><b>Routine settings</b><span class="spacer"></span><button class="btn" id="b-close">Done</button></header>
-    <div class="body" id="sbody">
+  <section class="pane" id="v-aim" hidden>
+    <div class="aimgrid">
+      <div class="aimbox" id="aimbox"><canvas id="aimcv"></canvas><div class="aimempty" id="aimempty">Connect to see what the camera sees</div></div>
+      <div class="panel aiminfo">
+        <h2>Camera view <span id="aim-age"></span></h2>
+        <div class="aimhint" id="aimhint">&ndash;</div>
+        <div class="legend"><span><i style="background:var(--accent)"></i>Confirmed flame</span><span><i style="background:var(--ink-3)"></i>Bright, not confirmed</span></div>
+        <div class="sw"><div><div class="t">Mirror view</div><div class="d">Left and right swapped on screen</div></div><button class="toggle" id="b-amir" role="switch" aria-label="Mirror view"></button></div>
+        <div class="sw"><div><div class="t">Flip view</div><div class="d">Camera mounted upside down</div></div><button class="toggle" id="b-aflip" role="switch" aria-label="Flip view"></button></div>
+        <p class="hint">The box is the whole camera picture. A confirmed flame anywhere in it starts the routine when armed. Positions are only shown while disarmed.</p>
+      </div>
+    </div>
+  </section>
+  <section class="pane" id="v-set" hidden>
+    <div class="setbody" id="sbody">
       <h3>Scan</h3>
       <div class="field"><label>Turn left <output id="o-tl"></output></label><input type="range" data-k="tl" min="0" max="5000" step="100"></div>
       <div class="field"><label>Turn right <output id="o-tr"></output></label><input type="range" data-k="tr" min="0" max="5000" step="100"></div>
@@ -195,7 +222,7 @@ input[type=range]{width:100%;height:28px;accent-color:var(--accent);margin:0}
       <div><button class="btn" id="b-ota">Start update mode</button></div>
       <p class="note">Update mode turns on the robot's Wi-Fi only for an upload: join "FireBot-Update" (password firebot123), open 192.168.4.1. The robot restarts in Bluetooth mode afterwards.</p>
     </div>
-  </div>
+  </section>
 </div>
 
 <div class="gate" id="gate">
@@ -211,7 +238,8 @@ input[type=range]{width:100%;height:28px;accent-color:var(--accent);margin:0}
 <script>
 const $=id=>document.getElementById(id);
 const SVC='6e400001-b5a3-f393-e0a9-e50e24dcca9e', CMD='6e400002-b5a3-f393-e0a9-e50e24dcca9e',
-      STA='6e400003-b5a3-f393-e0a9-e50e24dcca9e', CFG='6e400004-b5a3-f393-e0a9-e50e24dcca9e';
+      STA='6e400003-b5a3-f393-e0a9-e50e24dcca9e', CFG='6e400004-b5a3-f393-e0a9-e50e24dcca9e',
+      AIM='6e400005-b5a3-f393-e0a9-e50e24dcca9e';
 let dev=null, cCmd=null, lastStatusAt=0, st={}, cfg={};
 
 // ---------- full screen + landscape on any tap ----------
@@ -246,6 +274,7 @@ async function connect(){
       await BLE.connect(nativeId,()=>onDisc());
       await BLE.startNotifications(nativeId,SVC,STA,v=>onStatus(v));
       await BLE.startNotifications(nativeId,SVC,CFG,v=>onConfig(v));
+      try{ await BLE.startNotifications(nativeId,SVC,AIM,v=>onAim(v)); }catch(e){}
       linkUp=true;
       onStatus(await BLE.read(nativeId,SVC,STA)); onConfig(await BLE.read(nativeId,SVC,CFG));
     }else{
@@ -260,10 +289,12 @@ async function connect(){
       cs.addEventListener('characteristicvaluechanged',e=>onStatus(e.target.value));
       cc.addEventListener('characteristicvaluechanged',e=>onConfig(e.target.value));
       await cs.startNotifications(); await cc.startNotifications();
+      try{ const ca=await svc.getCharacteristic(AIM); ca.addEventListener('characteristicvaluechanged',e=>onAim(e.target.value)); await ca.startNotifications(); }catch(e){}
       linkUp=true;
       onStatus(await cs.readValue()); onConfig(await cc.readValue());
     }
     $('gate').classList.add('hide'); $('b-conn').textContent='Disconnect';
+    if(tab==='aim') send('aim=1');
   }catch(e){ linkUp=false; $('gerr').textContent=(e&&e.message)||'Could not connect'; setLink('Not connected',''); }
 }
 async function disconnect(){
@@ -331,9 +362,63 @@ function renderCfg(){
 }
 $('b-rev').onclick=()=>send('set=rev,'+($('b-rev').classList.contains('on')?0:1));
 $('b-flick').onclick=()=>send('set=flick,'+($('b-flick').classList.contains('on')?0:1));
-$('b-set').onclick=()=>{ $('sheet').classList.add('open'); $('sheet').setAttribute('aria-hidden','false'); send('cfg'); };
-$('b-close').onclick=()=>{ $('sheet').classList.remove('open'); $('sheet').setAttribute('aria-hidden','true'); };
-$('sheet').onclick=e=>{ if(e.target===$('sheet')) $('b-close').onclick(); };
+// ---------- tabs ----------
+let tab='ctl';
+function showTab(t){
+  tab=t;
+  document.querySelectorAll('[data-tab]').forEach(b=>{const on=b.dataset.tab===t; b.classList.toggle('on',on); b.setAttribute('aria-selected',on);});
+  ['ctl','aim','set'].forEach(k=>$('v-'+k).hidden = k!==t);
+  if(t!=='ctl') allStop();
+  send('aim='+(t==='aim'?1:0));
+  if(t==='set') send('cfg');
+  if(t==='aim') drawAim();
+}
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+
+// ---------- aim view ----------
+let aim={a:0,k:[]}, aimAt=0;
+const AIMV={mir:localStorage.getItem('aimMir')==='1', flip:localStorage.getItem('aimFlip')==='1'};
+function onAim(v){ try{ aim=JSON.parse(dec.decode(v)); }catch(e){ return; } aimAt=performance.now(); drawAim(); }
+$('b-amir').onclick=()=>{ AIMV.mir=!AIMV.mir; localStorage.setItem('aimMir',AIMV.mir?'1':'0'); drawAim(); };
+$('b-aflip').onclick=()=>{ AIMV.flip=!AIMV.flip; localStorage.setItem('aimFlip',AIMV.flip?'1':'0'); drawAim(); };
+function drawAim(){
+  setToggle('b-amir',AIMV.mir); setToggle('b-aflip',AIMV.flip);
+  const box=$('aimbox'), cv=$('aimcv'), W=box.clientWidth, H=box.clientHeight;
+  if(!W||!H) return;
+  const dpr=window.devicePixelRatio||1;
+  if(cv.width!==W*dpr||cv.height!==H*dpr){ cv.width=W*dpr; cv.height=H*dpr; }
+  const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
+  // camera frame (4:3) fitted in the box
+  const fw=Math.min(W-24,(H-24)*4/3), fh=fw*3/4, ox=(W-fw)/2, oy=(H-fh)/2;
+  g.fillStyle='#0b0e13'; g.fillRect(ox,oy,fw,fh);
+  g.strokeStyle='#323c49'; g.lineWidth=1.5; g.strokeRect(ox,oy,fw,fh);
+  g.strokeStyle='#ffffff14'; g.lineWidth=1;
+  for(let i=1;i<3;i++){ g.beginPath(); g.moveTo(ox+fw*i/3,oy); g.lineTo(ox+fw*i/3,oy+fh); g.stroke(); g.beginPath(); g.moveTo(ox,oy+fh*i/3); g.lineTo(ox+fw,oy+fh*i/3); g.stroke(); }
+  g.strokeStyle='#ffffff40'; g.setLineDash([5,6]); g.beginPath(); g.moveTo(ox+fw/2,oy); g.lineTo(ox+fw/2,oy+fh); g.stroke(); g.setLineDash([]);
+  g.fillStyle='#6f7c8d'; g.font='600 11px ui-monospace,Menlo,monospace';
+  g.fillText('LEFT',ox+8,oy+fh-8); g.fillText('RIGHT',ox+fw-46,oy+fh-8); g.fillText('CAMERA VIEW',ox+8,oy+16);
+  const live=linkUp && performance.now()-aimAt<1500;
+  $('aimempty').style.display=live?'none':'grid';
+  $('aimempty').textContent=!linkUp?'Connect to see what the camera sees':'Waiting for the robot…';
+  $('aim-age').textContent=live?'live':'';
+  if(!live){ $('aimhint').textContent='–'; return; }
+  if(aim.a){ $('aimhint').textContent='Robot is armed: positions are hidden. Disarm to aim.'; return; }
+  let best=null;
+  (aim.k||[]).forEach(t=>{
+    let [x,y,w,h,ok]=t; if(AIMV.mir) x=100-x; if(AIMV.flip) y=100-y;
+    const px=ox+fw*x/100, py=oy+fh*y/100, bw=Math.max(8,fw*w/100), bh=Math.max(8,fh*h/100);
+    g.strokeStyle=ok?'#ff5a1f':'#6f7c8d'; g.lineWidth=ok?2.5:1.5; g.strokeRect(px-bw/2,py-bh/2,bw,bh);
+    g.fillStyle=ok?'#ff5a1f':'#6f7c8d'; g.beginPath(); g.arc(px,py,ok?7:4,0,7); g.fill();
+    if(ok&&(!best||w>best.w)) best={x,y,w}; else if(!ok&&!best) best={x,y,w,cand:1};
+  });
+  let hint;
+  if(!best) hint='No flame in view. Move it in front of the camera.';
+  else if(best.cand) hint='Something bright: confirming… hold the flame still.';
+  else { const dx=best.x-50; hint= Math.abs(dx)<12 ? 'Flame confirmed and centred. Arm now.' : 'Flame confirmed, '+(dx<0?'left':'right')+' of centre. It will still trigger.'; }
+  $('aimhint').textContent=hint;
+}
+addEventListener('resize',()=>{ if(tab==='aim') drawAim(); });
+setInterval(()=>{ if(tab==='aim') drawAim(); },500);
 $('b-ota').onclick=()=>{ if(confirm('Turn on the robot\'s Wi-Fi for a firmware upload? Bluetooth control stops until it restarts.')) send('ota'); };
 
 // ---------- actions ----------
