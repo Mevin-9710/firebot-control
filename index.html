@@ -255,7 +255,7 @@ document.addEventListener('visibilitychange',()=>{ if(!document.hidden) window._
 // ---------- BLE: native plugin inside the app, Web Bluetooth in a browser ----------
 const NATIVE = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
 const BLE = NATIVE ? capacitorCommunityBluetoothLe.BleClient : null;
-let writeChain=Promise.resolve(), linkUp=false, nativeId=null;
+let writeChain=Promise.resolve(), linkUp=false, nativeId=null, hasAim=null, cAim=null;
 function send(c){
   if(!linkUp) return;
   const data=new TextEncoder().encode(c);
@@ -274,6 +274,8 @@ async function connect(){
       await BLE.connect(nativeId,()=>onDisc());
       await BLE.startNotifications(nativeId,SVC,STA,v=>onStatus(v));
       await BLE.startNotifications(nativeId,SVC,CFG,v=>onConfig(v));
+      try{ const sv=await BLE.getServices(nativeId);
+           hasAim=sv.some(x=>x.uuid.toLowerCase()===SVC && x.characteristics.some(c=>c.uuid.toLowerCase()===AIM)); }catch(e){ hasAim=null; }
       try{ await BLE.startNotifications(nativeId,SVC,AIM,v=>onAim(v)); }catch(e){}
       linkUp=true;
       onStatus(await BLE.read(nativeId,SVC,STA)); onConfig(await BLE.read(nativeId,SVC,CFG));
@@ -289,7 +291,7 @@ async function connect(){
       cs.addEventListener('characteristicvaluechanged',e=>onStatus(e.target.value));
       cc.addEventListener('characteristicvaluechanged',e=>onConfig(e.target.value));
       await cs.startNotifications(); await cc.startNotifications();
-      try{ const ca=await svc.getCharacteristic(AIM); ca.addEventListener('characteristicvaluechanged',e=>onAim(e.target.value)); await ca.startNotifications(); }catch(e){}
+      try{ cAim=await svc.getCharacteristic(AIM); hasAim=true; cAim.addEventListener('characteristicvaluechanged',e=>onAim(e.target.value)); await cAim.startNotifications(); }catch(e){ hasAim=false; }
       linkUp=true;
       onStatus(await cs.readValue()); onConfig(await cc.readValue());
     }
@@ -399,7 +401,9 @@ function drawAim(){
   g.fillText('LEFT',ox+8,oy+fh-8); g.fillText('RIGHT',ox+fw-46,oy+fh-8); g.fillText('CAMERA VIEW',ox+8,oy+16);
   const live=linkUp && performance.now()-aimAt<1500;
   $('aimempty').style.display=live?'none':'grid';
-  $('aimempty').textContent=!linkUp?'Connect to see what the camera sees':'Waiting for the robot…';
+  $('aimempty').textContent=!linkUp?'Connect to see what the camera sees'
+    : hasAim===false?'Robot firmware has no aim data. Flash the latest firmware, then forget the robot in Android Bluetooth settings and reconnect.'
+    :'Waiting for the robot…';
   $('aim-age').textContent=live?'live':'';
   if(!live){ $('aimhint').textContent='–'; return; }
   if(aim.a){ $('aimhint').textContent='Robot is armed: positions are hidden. Disarm to aim.'; return; }
@@ -418,6 +422,15 @@ function drawAim(){
   $('aimhint').textContent=hint;
 }
 addEventListener('resize',()=>{ if(tab==='aim') drawAim(); });
+let aimBusy=false;
+setInterval(async()=>{                       // read directly too: works even if notifications don't
+  if(tab!=='aim'||!linkUp||aimBusy||hasAim===false) return;
+  aimBusy=true;
+  try{ const v = NATIVE ? await BLE.read(nativeId,SVC,AIM) : (cAim ? await cAim.readValue() : null); if(v) onAim(v); }
+  catch(e){ if(NATIVE) hasAim=false; }
+  aimBusy=false;
+},250);
+setInterval(()=>{ if(tab==='aim'&&linkUp) send('aim=1'); },2000);   // keep the robot's aim stream on
 setInterval(()=>{ if(tab==='aim') drawAim(); },500);
 $('b-ota').onclick=()=>{ if(confirm('Turn on the robot\'s Wi-Fi for a firmware upload? Bluetooth control stops until it restarts.')) send('ota'); };
 
